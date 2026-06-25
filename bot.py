@@ -634,9 +634,10 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
-    app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_"))
+    app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
+    app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_(?!one_).+"))
+    app.add_handler(CallbackQueryHandler(delete_one_exercise, pattern="^delex_one_\\d+$"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
-    app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_"))
     
 
     logger.info("Бот запущен!")
