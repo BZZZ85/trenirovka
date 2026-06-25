@@ -425,7 +425,7 @@ def main():
            .build())
 
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start), MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
+        entry_points=[CommandHandler("start", start)],
         states={
             MAIN_MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
             ADD_WORKOUT_DATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, add_workout_date)],
