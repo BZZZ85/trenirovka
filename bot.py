@@ -330,7 +330,7 @@ async def show_workout_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     async with pool(context).acquire() as conn:
         w = await conn.fetchrow("SELECT date, notes FROM workouts WHERE id=$1", workout_id)
-        exs = await conn.fetch("SELECT name, sets, reps, weight FROM exercises WHERE workout_id=$1", workout_id)
+        exs = await conn.fetch("SELECT id, name, sets, reps, weight FROM exercises WHERE workout_id=$1", workout_id)
 
     if not w:
         await query.edit_message_text("❌ Тренировка не найдена.")
@@ -343,11 +343,24 @@ async def show_workout_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     if w['notes']:
         lines.append(f"\n📝 _{w['notes']}_")
 
+    buttons = []
+    for ex in exs:
+        buttons.append([InlineKeyboardButton(f"🗑 {ex['name']}", callback_data=f"delex_one_{ex['id']}")])
+    buttons.append([InlineKeyboardButton("🗑 Удалить всю тренировку", callback_data=f"delete_{workout_id}")])
+
     await query.edit_message_text(
         "\n".join(lines), parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🗑 Удалить", callback_data=f"delete_{workout_id}")]])
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
+async def delete_one_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ex_id = int(query.data.replace("delex_one_", "", 1))
 
+    async with pool(context).acquire() as conn:
+        await conn.execute("DELETE FROM exercises WHERE id=$1", ex_id)
+
+    await query.edit_message_text("✅ Упражнение удалено из тренировки.")
 
 async def delete_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -624,6 +637,7 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_"))
+    
 
     logger.info("Бот запущен!")
     app.run_polling()
