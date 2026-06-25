@@ -123,35 +123,40 @@ async def add_workout_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text("❌ Неверный формат. Введи как 25.06.2025 или *сегодня*:", parse_mode="Markdown")
             return ADD_WORKOUT_DATE
-    context.user_data['workout_date'] = date
-    await update.message.reply_text(f"✅ Дата: {date}\n\n🏋️ Введи название упражнения:")
-    return ADD_EXERCISE_NAME
+    context.user_data['choosing_exercise'] = False
+    await update.message.reply_text(f"✅ Дата: {date}")
+    return await add_exercise_name(update, context)
 
 
 async def add_exercise_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    
-    # Если пришло название упражнения — сохраняем и идём дальше
-    if context.user_data.get('choosing_exercise'):
-        context.user_data['choosing_exercise'] = False
-        context.user_data['current_exercise'] = {'name': text}
-        await update.message.reply_text("🔢 Сколько подходов?", reply_markup=main_keyboard())
-        return ADD_SETS
-
-    # Показываем прошлые упражнения как кнопки
     user_id = update.effective_user.id
+
     async with pool(context).acquire() as conn:
         rows = await conn.fetch(
             "SELECT DISTINCT name FROM exercises e JOIN workouts w ON e.workout_id=w.id WHERE w.user_id=$1 ORDER BY name LIMIT 8",
             user_id
         )
 
+    # Если текст — одно из прошлых упражнений или не служебная кнопка
+    known = [r['name'] for r in rows]
+    if text in known or (text != "✏️ Новое упражнение" and rows and context.user_data.get('choosing_exercise')):
+        context.user_data['choosing_exercise'] = False
+        context.user_data['current_exercise'] = {'name': text}
+        await update.message.reply_text("🔢 Сколько подходов?", reply_markup=main_keyboard())
+        return ADD_SETS
+
+    if text == "✏️ Новое упражнение":
+        context.user_data['choosing_exercise'] = True
+        await update.message.reply_text("🏋️ Введи название упражнения:", reply_markup=main_keyboard())
+        return ADD_EXERCISE_NAME
+
+    # Показываем кнопки сразу
     context.user_data['choosing_exercise'] = True
-    buttons = [[KeyboardButton(r['name'])] for r in rows]
-    buttons.append([KeyboardButton("✏️ Другое упражнение")])
-    
+    buttons = [[KeyboardButton(name)] for name in known]
+    buttons.append([KeyboardButton("✏️ Новое упражнение")])
     await update.message.reply_text(
-        "🏋️ Выбери упражнение или напиши новое:",
+        "🏋️ Выбери упражнение:",
         reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     )
     return ADD_EXERCISE_NAME
@@ -202,8 +207,8 @@ async def add_weight_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def add_more_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "➕ Добавить упражнение":
-        await update.message.reply_text("🏋️ Введи название упражнения:")
-        return ADD_EXERCISE_NAME
+        context.user_data['choosing_exercise'] = False
+        return await add_exercise_name(update, context)
     elif text == "✅ Завершить тренировку":
         await update.message.reply_text(
             "📝 Заметки к тренировке? Или напиши *пропустить*:",
