@@ -161,9 +161,13 @@ async def add_exercise_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_sets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.strip() == "🔙 Назад":
+        context.user_data['choosing_exercise'] = False
+        return await add_exercise_name(update, context)
     try:
         context.user_data['current_exercise']['sets'] = int(update.message.text.strip())
-        await update.message.reply_text("🔁 Сколько повторений? (например: 10 или 8-10-12)")
+        await update.message.reply_text("🔁 Сколько повторений? (например: 10 или 8-10-12)",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
         return ADD_REPS
     except ValueError:
         await update.message.reply_text("❌ Введи число:")
@@ -171,11 +175,16 @@ async def add_sets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.strip() == "🔙 Назад":
+        await update.message.reply_text("🔢 Сколько подходов?",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return ADD_SETS
     context.user_data['current_exercise']['reps'] = update.message.text.strip()
     sets = context.user_data['current_exercise']['sets']
     await update.message.reply_text(
         f"🏋️ Введи вес для каждого подхода через пробел ({sets} подх.)\nНапример: `100 95 90` или `80` если везде одинаково\nИли напиши *без веса*:",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
     )
     return ADD_WEIGHT
 
