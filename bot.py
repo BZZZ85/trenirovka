@@ -74,7 +74,7 @@ def main_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("💪 Добавить тренировку"), KeyboardButton("📋 История")],
         [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
-        [KeyboardButton("⏰ Напоминания")]
+        [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")]
     ], resize_keyboard=True)
 
 
@@ -91,6 +91,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if context.user_data.get('waiting_progress_exercise'):
+        return await show_exercise_progress(update, context)
     if text == "💪 Добавить тренировку":
         context.user_data['exercises'] = []
         context.user_data['workout_date'] = datetime.now().strftime("%d.%m.%Y")
@@ -105,6 +107,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await show_stats(update, context)
     elif text == "⏰ Напоминания":
         return await reminders_menu(update, context)
+    elif text == "📈 Прогресс":
+        return await show_progress(update, context)
     return MAIN_MENU
 
 
@@ -473,7 +477,71 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             logger.error(f"Ошибка напоминания {row['user_id']}: {e}")
+#прогресс
+async def show_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        # Все упражнения пользователя
+        exercises = await conn.fetch("""
+            SELECT DISTINCT e.name FROM exercises e
+            JOIN workouts w ON e.workout_id = w.id
+            WHERE w.user_id=$1 ORDER BY e.name
+        """, user_id)
 
+    if not exercises:
+        await update.message.reply_text("📭 Пока нет данных для прогресса.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    buttons = [[KeyboardButton(r['name'])] for r in exercises]
+    buttons.append([KeyboardButton("🔙 Назад")])
+    await update.message.reply_text(
+        "📈 Выбери упражнение для анализа прогресса:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    context.user_data['waiting_progress_exercise'] = True
+    return MAIN_MENU
+
+
+async def show_exercise_progress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
+
+    if text == "🔙 Назад":
+        context.user_data.pop('waiting_progress_exercise', None)
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    async with pool(context).acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT w.date, e.weight, e.reps, e.sets FROM exercises e
+            JOIN workouts w ON e.workout_id = w.id
+            WHERE w.user_id=$1 AND e.name=$2
+            ORDER BY w.date DESC LIMIT 5
+        """, user_id, text)
+
+    if not rows:
+        await update.message.reply_text("Нет данных по этому упражнению.", reply_markup=main_keyboard())
+        context.user_data.pop('waiting_progress_exercise', None)
+        return MAIN_MENU
+
+    context.user_data.pop('waiting_progress_exercise', None)
+    lines = [f"📈 *Прогресс: {text}*\n"]
+
+    last_weight = None
+    for r in reversed(rows):
+        w = r['weight']
+        lines.append(f"📅 {r['date']}: {r['sets']}×{r['reps']} @ {w if w else '—'} кг")
+        last_weight = w
+
+    # Рекомендация
+    if last_weight:
+        next_weight = round(last_weight * 1.05 / 2.5) * 2.5  # +5%, округление до 2.5 кг
+        lines.append(f"\n💡 *Рекомендация:* попробуй {next_weight} кг на следующей тренировке (+5%)")
+    else:
+        lines.append("\n💡 Добавь вес на следующей тренировке!")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_keyboard())
+    return MAIN_MENU
 
 # ── CANCEL + MAIN ─────────────────────────────────────────────────────────────
 
