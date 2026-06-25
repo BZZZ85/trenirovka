@@ -615,11 +615,6 @@ def main():
            .post_shutdown(close_pool)
            .build())
 
-    import asyncio
-    async def reset():
-        await app.bot.delete_webhook(drop_pending_updates=True)
-    asyncio.get_event_loop().run_until_complete(reset())
-
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -643,10 +638,9 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_(?!one_).+"))
     app.add_handler(CallbackQueryHandler(delete_one_exercise, pattern="^delex_one_\\d+$"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
-    
 
     logger.info("Бот запущен!")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
