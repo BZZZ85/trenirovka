@@ -130,29 +130,37 @@ async def add_exercise_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     user_id = update.effective_user.id
 
+    if text == "🔙 Назад":
+        context.user_data['exercises'] = []
+        await update.message.reply_text("Возврат в меню.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
     async with pool(context).acquire() as conn:
         rows = await conn.fetch(
             "SELECT DISTINCT name FROM exercises e JOIN workouts w ON e.workout_id=w.id WHERE w.user_id=$1 ORDER BY name LIMIT 8",
             user_id
         )
 
-    # Если текст — одно из прошлых упражнений или не служебная кнопка
     known = [r['name'] for r in rows]
-    if text in known or (text != "✏️ Новое упражнение" and rows and context.user_data.get('choosing_exercise')):
-        context.user_data['choosing_exercise'] = False
-        context.user_data['current_exercise'] = {'name': text}
-        await update.message.reply_text("🔢 Сколько подходов?", reply_markup=main_keyboard())
-        return ADD_SETS
 
     if text == "✏️ Новое упражнение":
         context.user_data['choosing_exercise'] = True
-        await update.message.reply_text("🏋️ Введи название упражнения:", reply_markup=main_keyboard())
+        await update.message.reply_text("🏋️ Введи название упражнения:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
         return ADD_EXERCISE_NAME
 
-    # Показываем кнопки сразу
+    if text in known or context.user_data.get('choosing_exercise'):
+        context.user_data['choosing_exercise'] = False
+        context.user_data['current_exercise'] = {'name': text}
+        await update.message.reply_text("🔢 Сколько подходов?",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return ADD_SETS
+
+    # Показываем кнопки
     context.user_data['choosing_exercise'] = True
     buttons = [[KeyboardButton(name)] for name in known]
     buttons.append([KeyboardButton("✏️ Новое упражнение")])
+    buttons.append([KeyboardButton("🔙 Назад")])
     await update.message.reply_text(
         "🏋️ Выбери упражнение:",
         reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
