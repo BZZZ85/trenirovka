@@ -129,9 +129,32 @@ async def add_workout_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_exercise_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['current_exercise'] = {'name': update.message.text.strip()}
-    await update.message.reply_text("🔢 Сколько подходов?")
-    return ADD_SETS
+    text = update.message.text.strip()
+    
+    # Если пришло название упражнения — сохраняем и идём дальше
+    if context.user_data.get('choosing_exercise'):
+        context.user_data['choosing_exercise'] = False
+        context.user_data['current_exercise'] = {'name': text}
+        await update.message.reply_text("🔢 Сколько подходов?", reply_markup=main_keyboard())
+        return ADD_SETS
+
+    # Показываем прошлые упражнения как кнопки
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT name FROM exercises e JOIN workouts w ON e.workout_id=w.id WHERE w.user_id=$1 ORDER BY name LIMIT 8",
+            user_id
+        )
+
+    context.user_data['choosing_exercise'] = True
+    buttons = [[KeyboardButton(r['name'])] for r in rows]
+    buttons.append([KeyboardButton("✏️ Другое упражнение")])
+    
+    await update.message.reply_text(
+        "🏋️ Выбери упражнение или напиши новое:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    return ADD_EXERCISE_NAME
 
 
 async def add_sets(update: Update, context: ContextTypes.DEFAULT_TYPE):
