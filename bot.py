@@ -93,11 +93,9 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if text == "💪 Добавить тренировку":
         context.user_data['exercises'] = []
-        await update.message.reply_text(
-            "📅 Введи дату тренировки (например: 25.06.2025)\nИли напиши *сегодня*:",
-            parse_mode="Markdown"
-        )
-        return ADD_WORKOUT_DATE
+        context.user_data['workout_date'] = datetime.now().strftime("%d.%m.%Y")
+        context.user_data['choosing_exercise'] = False
+        return await add_exercise_name(update, context)
     elif text == "📋 История":
         return await show_history(update, context)
     elif text == "⚖️ Записать вес":
@@ -174,28 +172,41 @@ async def add_sets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['current_exercise']['reps'] = update.message.text.strip()
-    await update.message.reply_text("🏋️ Вес в кг? (или напиши *без веса*):", parse_mode="Markdown")
+    sets = context.user_data['current_exercise']['sets']
+    await update.message.reply_text(
+        f"🏋️ Введи вес для каждого подхода через пробел ({sets} подх.)\nНапример: `100 95 90` или `80` если везде одинаково\nИли напиши *без веса*:",
+        parse_mode="Markdown"
+    )
     return ADD_WEIGHT
 
 
 async def add_weight_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if text.lower() == "без веса":
+        weight_str = "без веса"
         weight = None
     else:
+        parts = text.replace(",", ".").split()
         try:
-            weight = float(text.replace(",", "."))
+            weights = [float(p) for p in parts]
         except ValueError:
-            await update.message.reply_text("❌ Введи число или *без веса*:", parse_mode="Markdown")
+            await update.message.reply_text("❌ Введи числа через пробел, например: `100 95 90`", parse_mode="Markdown")
             return ADD_WEIGHT
+        if len(weights) == 1:
+            weight = weights[0]
+            weight_str = f"{weight} кг"
+        else:
+            weight = max(weights)
+            weight_str = " / ".join(f"{w} кг" for w in weights)
+            context.user_data['current_exercise']['weight_detail'] = weight_str
 
     context.user_data['current_exercise']['weight'] = weight
     context.user_data['exercises'].append(dict(context.user_data['current_exercise']))
 
     ex = context.user_data['current_exercise']
-    w_str = f"{weight} кг" if weight else "без веса"
+    w_display = context.user_data['current_exercise'].get('weight_detail', weight_str)
     await update.message.reply_text(
-        f"✅ *{ex['name']}* — {ex['sets']} подх. × {ex['reps']} повт. @ {w_str}\n\nДобавить ещё?",
+        f"✅ *{ex['name']}* — {ex['sets']} подх. × {ex['reps']} повт. @ {w_display}\n\nДобавить ещё?",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardMarkup([
             [KeyboardButton("➕ Добавить упражнение"), KeyboardButton("✅ Завершить тренировку")]
@@ -237,7 +248,7 @@ async def add_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = [f"🎉 *Тренировка сохранена!*\n📅 {date}\n"]
     for ex in exercises:
-        w = f"{ex['weight']} кг" if ex.get('weight') else "без веса"
+        w = ex.get('weight_detail') or (f"{ex['weight']} кг" if ex.get('weight') else "без веса")
         lines.append(f"• {ex['name']}: {ex['sets']}×{ex['reps']} @ {w}")
     if notes:
         lines.append(f"\n📝 {notes}")
@@ -456,7 +467,6 @@ def main():
         entry_points=[CommandHandler("start", start)],
         states={
             MAIN_MENU:          [MessageHandler(filters.TEXT & ~filters.COMMAND, main_menu_handler)],
-            ADD_WORKOUT_DATE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, add_workout_date)],
             ADD_EXERCISE_NAME:  [MessageHandler(filters.TEXT & ~filters.COMMAND, add_exercise_name)],
             ADD_SETS:           [MessageHandler(filters.TEXT & ~filters.COMMAND, add_sets)],
             ADD_REPS:           [MessageHandler(filters.TEXT & ~filters.COMMAND, add_reps)],
