@@ -199,6 +199,14 @@ async def add_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_weight_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+
+    if text == "🔙 Назад":
+        sets = context.user_data['current_exercise']['sets']
+        await update.message.reply_text(
+            f"🔁 Сколько повторений?",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return ADD_REPS
+
     if text.lower() == "без веса":
         weight_str = "без веса"
         weight = None
@@ -219,14 +227,14 @@ async def add_weight_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     context.user_data['current_exercise']['weight'] = weight
     context.user_data['exercises'].append(dict(context.user_data['current_exercise']))
-
     ex = context.user_data['current_exercise']
-    w_display = context.user_data['current_exercise'].get('weight_detail', weight_str)
+    w_display = ex.get('weight_detail', weight_str)
     await update.message.reply_text(
         f"✅ *{ex['name']}* — {ex['sets']} подх. × {ex['reps']} повт. @ {w_display}\n\nДобавить ещё?",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardMarkup([
-            [KeyboardButton("➕ Добавить упражнение"), KeyboardButton("✅ Завершить тренировку")]
+            [KeyboardButton("➕ Добавить упражнение"), KeyboardButton("✅ Завершить тренировку")],
+            [KeyboardButton("🔙 Назад")]
         ], resize_keyboard=True)
     )
     return ADD_MORE_EXERCISES
@@ -234,13 +242,21 @@ async def add_weight_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def add_more_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if text == "➕ Добавить упражнение":
+    if text == "🔙 Назад":
+        if context.user_data['exercises']:
+            context.user_data['exercises'].pop()
+        context.user_data['choosing_exercise'] = False
+        return await add_exercise_name(update, context)
+    elif text == "➕ Добавить упражнение":
         context.user_data['choosing_exercise'] = False
         return await add_exercise_name(update, context)
     elif text == "✅ Завершить тренировку":
         await update.message.reply_text(
             "📝 Заметки к тренировке? Или напиши *пропустить*:",
-            parse_mode="Markdown", reply_markup=main_keyboard()
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup([
+                [KeyboardButton("пропустить"), KeyboardButton("🔙 Назад")]
+            ], resize_keyboard=True)
         )
         return ADD_NOTES
     return ADD_MORE_EXERCISES
