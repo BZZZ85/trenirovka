@@ -61,7 +61,8 @@ async def get_pool(app):
 
 
 async def close_pool(app):
-    await app.bot_data['pool'].close()
+    if 'pool' in app.bot_data:
+        await app.bot_data['pool'].close()
 
 
 def pool(context):
