@@ -74,9 +74,9 @@ def main_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("💪 Добавить тренировку"), KeyboardButton("📋 История")],
         [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
-        [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")]
+        [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")],
+        [KeyboardButton("🗑 Упражнения")]
     ], resize_keyboard=True)
-
 
 # ── СТАРТ ─────────────────────────────────────────────────────────────────────
 
@@ -109,6 +109,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await reminders_menu(update, context)
     elif text == "📈 Прогресс":
         return await show_progress(update, context)
+    elif text == "🗑 Упражнения":
+        return await manage_exercises(update, context)
     return MAIN_MENU
 
 
@@ -542,7 +544,43 @@ async def show_exercise_progress(update: Update, context: ContextTypes.DEFAULT_T
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_keyboard())
     return MAIN_MENU
+#Удаления 
+async def manage_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT DISTINCT e.name FROM exercises e
+            JOIN workouts w ON e.workout_id = w.id
+            WHERE w.user_id=$1 ORDER BY e.name
+        """, user_id)
 
+    if not rows:
+        await update.message.reply_text("📭 Нет упражнений.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    buttons = [[InlineKeyboardButton(f"🗑 {r['name']}", callback_data=f"delex_{r['name']}")] for r in rows]
+    await update.message.reply_text(
+        "🗑 Выбери упражнение для удаления из истории:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    return MAIN_MENU
+
+
+async def delete_exercise_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    name = query.data.replace("delex_", "", 1)
+    user_id = query.from_user.id
+
+    async with pool(context).acquire() as conn:
+        await conn.execute("""
+            DELETE FROM exercises WHERE name=$1 AND workout_id IN (
+                SELECT id FROM workouts WHERE user_id=$2
+            )
+        """, name, user_id)
+
+    await query.edit_message_text(f"✅ Упражнение *{name}* удалено из всей истории.", parse_mode="Markdown")
+    
 # ── CANCEL + MAIN ─────────────────────────────────────────────────────────────
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -585,6 +623,7 @@ def main():
     app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
+    app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_"))
 
     logger.info("Бот запущен!")
     app.run_polling()
