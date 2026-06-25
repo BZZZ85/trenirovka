@@ -615,6 +615,11 @@ def main():
            .post_shutdown(close_pool)
            .build())
 
+    import asyncio
+    async def reset():
+        await app.bot.delete_webhook(drop_pending_updates=True)
+    asyncio.get_event_loop().run_until_complete(reset())
+
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
