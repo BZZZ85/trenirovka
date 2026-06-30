@@ -97,6 +97,22 @@ async def get_pool(app):
                 time TEXT NOT NULL,
                 enabled BOOLEAN DEFAULT TRUE
             )''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS templates (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT NOW()
+            )''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS template_exercises (
+                id SERIAL PRIMARY KEY,
+                template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                sets INTEGER,
+                reps TEXT,
+                weight REAL
+            )''')
     logger.info("БД готова.")
 
 
@@ -139,6 +155,10 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await process_delete_exercise(update, context)
     if context.user_data.get('waiting_progress_exercise'):
         return await show_exercise_progress(update, context)
+    if context.user_data.get('waiting_template_name'):
+        return await save_template_name(update, context)
+    if context.user_data.get('waiting_template_choice'):
+        return await use_template(update, context)
     if text == "💪 Добавить тренировку":
         context.user_data['exercises'] = []
         context.user_data['workout_date'] = datetime.now().strftime("%d.%m.%Y")
@@ -159,7 +179,14 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await manage_exercises(update, context)
     elif text == "🎯 Готовые программы":
         return await preset_programs_menu(update, context)
-    return MAIN_MENU
+    elif text == "💾 Сохранить как шаблон":
+        if not context.user_data.get('last_exercises'):
+            await update.message.reply_text("Нет данных последней тренировки.", reply_markup=main_keyboard())
+            return MAIN_MENU
+        context.user_data['waiting_template_name'] = True
+        await update.message.reply_text("Введи название шаблона (например: День ног):",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return MAIN_MENU
 
 async def preset_programs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [[KeyboardButton(name)] for name in PRESET_PROGRAMS.keys()]
@@ -385,8 +412,18 @@ async def add_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if notes:
         lines.append(f"\n📝 {notes}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_keyboard())
-    context.user_data.clear()
+    context.user_data['last_exercises'] = exercises
+    await update.message.reply_text(
+        "\n".join(lines), parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("💾 Сохранить как шаблон")],
+            [KeyboardButton("💪 Добавить тренировку"), KeyboardButton("📋 История")],
+            [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
+            [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")],
+            [KeyboardButton("Упражнения"), KeyboardButton("📑 Шаблоны")],
+            [KeyboardButton("🎯 Готовые программы")]
+        ], resize_keyboard=True)
+    )
     return MAIN_MENU
 
 
@@ -674,6 +711,96 @@ async def manage_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     )
     return MAIN_MENU
+async def save_template_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_template_name', None)
+
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    user_id = update.effective_user.id
+    exercises = context.user_data.get('last_exercises', [])
+
+    async with pool(context).acquire() as conn:
+        template_id = await conn.fetchval(
+            "INSERT INTO templates (user_id, name) VALUES ($1, $2) RETURNING id",
+            user_id, text
+        )
+        await conn.executemany(
+            "INSERT INTO template_exercises (template_id, name, sets, reps, weight) VALUES ($1, $2, $3, $4, $5)",
+            [(template_id, ex['name'], ex['sets'], ex['reps'], ex.get('weight')) for ex in exercises]
+        )
+
+    await update.message.reply_text(f"✅ Шаблон «{text}» сохранён!", reply_markup=main_keyboard())
+    return MAIN_MENU
+
+
+async def templates_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        rows = await conn.fetch("SELECT id, name FROM templates WHERE user_id=$1 ORDER BY name", user_id)
+
+    if not rows:
+        await update.message.reply_text("📭 Нет сохранённых шаблонов.\nСохрани после следующей тренировки кнопкой «💾 Сохранить как шаблон»!", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    context.user_data['template_map'] = {r['name']: r['id'] for r in rows}
+    buttons = [[KeyboardButton(r['name'])] for r in rows]
+    buttons.append([KeyboardButton("🔙 Назад")])
+
+    context.user_data['waiting_template_choice'] = True
+    await update.message.reply_text(
+        "📑 Выбери шаблон для запуска тренировки:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    return MAIN_MENU
+
+
+async def use_template(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_template_choice', None)
+
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    template_map = context.user_data.get('template_map', {})
+    template_id = template_map.get(text)
+
+    if not template_id:
+        await update.message.reply_text("Шаблон не найден.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    async with pool(context).acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT name, sets, reps, weight FROM template_exercises WHERE template_id=$1",
+            template_id
+        )
+
+    exercises = [{'name': r['name'], 'sets': r['sets'], 'reps': r['reps'], 'weight': r['weight']} for r in rows]
+
+    user_id = update.effective_user.id
+    date = datetime.now().strftime("%d.%m.%Y")
+
+    async with pool(context).acquire() as conn:
+        workout_id = await conn.fetchval(
+            "INSERT INTO workouts (user_id, date, notes) VALUES ($1, $2, $3) RETURNING id",
+            user_id, date, f"По шаблону: {text}"
+        )
+        await conn.executemany(
+            "INSERT INTO exercises (workout_id, name, sets, reps, weight) VALUES ($1, $2, $3, $4, $5)",
+            [(workout_id, ex['name'], ex['sets'], ex['reps'], ex.get('weight')) for ex in exercises]
+        )
+
+    lines = [f"🎉 *Тренировка по шаблону «{text}» сохранена!*\n📅 {date}\n"]
+    for ex in exercises:
+        w = f"{ex['weight']} кг" if ex.get('weight') else "без веса"
+        lines.append(f"• {ex['name']}: {ex['sets']}×{ex['reps']} @ {w}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_keyboard())
+    return MAIN_MENU
+
 async def process_delete_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     context.user_data.pop('waiting_delete_exercise', None)
