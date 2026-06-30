@@ -15,7 +15,47 @@ logger = logging.getLogger(__name__)
  ADD_SETS, ADD_REPS, ADD_WEIGHT, ADD_MORE_EXERCISES, ADD_NOTES,
  LOG_WEIGHT, SET_REMINDER) = range(10)
 
-
+PRESET_PROGRAMS = {
+    "Full Body (3 дня/нед)": [
+        {"name": "Приседания со штангой", "sets": 3, "reps": "8-10"},
+        {"name": "Жим лёжа", "sets": 3, "reps": "8-10"},
+        {"name": "Тяга штанги в наклоне", "sets": 3, "reps": "8-10"},
+        {"name": "Жим стоя", "sets": 3, "reps": "10"},
+        {"name": "Подтягивания", "sets": 3, "reps": "макс"},
+        {"name": "Планка", "sets": 3, "reps": "60 сек"},
+    ],
+    "Push (грудь/плечи/трицепс)": [
+        {"name": "Жим лёжа", "sets": 4, "reps": "6-8"},
+        {"name": "Жим гантелей под углом", "sets": 3, "reps": "8-10"},
+        {"name": "Жим стоя", "sets": 3, "reps": "8-10"},
+        {"name": "Разведения гантелей", "sets": 3, "reps": "12-15"},
+        {"name": "Французский жим", "sets": 3, "reps": "10-12"},
+        {"name": "Отжимания на брусьях", "sets": 3, "reps": "макс"},
+    ],
+    "Pull (спина/бицепс)": [
+        {"name": "Становая тяга", "sets": 4, "reps": "5-6"},
+        {"name": "Подтягивания", "sets": 4, "reps": "макс"},
+        {"name": "Тяга штанги в наклоне", "sets": 3, "reps": "8-10"},
+        {"name": "Тяга верхнего блока", "sets": 3, "reps": "10-12"},
+        {"name": "Подъём штанги на бицепс", "sets": 3, "reps": "10-12"},
+        {"name": "Молотки с гантелями", "sets": 3, "reps": "12"},
+    ],
+    "Leg (ноги/ягодицы)": [
+        {"name": "Приседания со штангой", "sets": 4, "reps": "6-8"},
+        {"name": "Румынская тяга", "sets": 3, "reps": "8-10"},
+        {"name": "Жим ногами", "sets": 3, "reps": "10-12"},
+        {"name": "Выпады с гантелями", "sets": 3, "reps": "10 на ногу"},
+        {"name": "Подъём на носки", "sets": 4, "reps": "15-20"},
+        {"name": "Гиперэкстензия", "sets": 3, "reps": "12-15"},
+    ],
+    "Начинающий (3 дня/нед)": [
+        {"name": "Приседания со штангой", "sets": 3, "reps": "10"},
+        {"name": "Жим лёжа", "sets": 3, "reps": "10"},
+        {"name": "Тяга штанги в наклоне", "sets": 3, "reps": "10"},
+        {"name": "Жим стоя", "sets": 2, "reps": "10"},
+        {"name": "Планка", "sets": 3, "reps": "30-45 сек"},
+    ],
+}
 # ── БД ────────────────────────────────────────────────────────────────────────
 
 def get_db_url():
@@ -76,7 +116,8 @@ def main_keyboard():
         [KeyboardButton("💪 Добавить тренировку"), KeyboardButton("📋 История")],
         [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
         [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")],
-        [KeyboardButton("Упражнения")]
+        [KeyboardButton("Упражнения"), KeyboardButton("📑 Шаблоны")],
+        [KeyboardButton("🎯 Готовые программы")]
     ], resize_keyboard=True)
 
 # ── СТАРТ ─────────────────────────────────────────────────────────────────────
@@ -114,8 +155,55 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await show_progress(update, context)
     elif text == "Упражнения":
         return await manage_exercises(update, context)
+    elif text == "🎯 Готовые программы":
+        return await preset_programs_menu(update, context)
     return MAIN_MENU
 
+async def preset_programs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    buttons = [[KeyboardButton(name)] for name in PRESET_PROGRAMS.keys()]
+    buttons.append([KeyboardButton("🔙 Назад")])
+
+    context.user_data['waiting_preset_choice'] = True
+    await update.message.reply_text(
+        "🎯 Выбери готовую программу:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    return MAIN_MENU
+
+
+async def use_preset_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_preset_choice', None)
+
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    program = PRESET_PROGRAMS.get(text)
+    if not program:
+        await update.message.reply_text("Программа не найдена.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    user_id = update.effective_user.id
+    date = datetime.now().strftime("%d.%m.%Y")
+
+    async with pool(context).acquire() as conn:
+        workout_id = await conn.fetchval(
+            "INSERT INTO workouts (user_id, date, notes) VALUES ($1, $2, $3) RETURNING id",
+            user_id, date, f"Программа: {text}"
+        )
+        await conn.executemany(
+            "INSERT INTO exercises (workout_id, name, sets, reps, weight) VALUES ($1, $2, $3, $4, NULL)",
+            [(workout_id, ex['name'], ex['sets'], ex['reps']) for ex in program]
+        )
+
+    lines = [f"🎉 *Тренировка по программе «{text}» сохранена!*\n📅 {date}\n"]
+    for ex in program:
+        lines.append(f"• {ex['name']}: {ex['sets']}×{ex['reps']}")
+    lines.append("\n💡 Вес можно добавить позже через редактирование в истории.")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=main_keyboard())
+    return MAIN_MENU
 
 # ── ДОБАВЛЕНИЕ ТРЕНИРОВКИ ─────────────────────────────────────────────────────
 
