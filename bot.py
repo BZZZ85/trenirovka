@@ -572,18 +572,28 @@ async def manage_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 Нет упражнений.", reply_markup=main_keyboard())
         return MAIN_MENU
 
-    buttons = [[InlineKeyboardButton(f"🗑 {r['name']}", callback_data=f"delex_{r['name']}")] for r in rows]
+    # Сохраняем имена во временный словарь, в кнопке передаём короткий индекс
+    names = [r['name'] for r in rows]
+    context.user_data['delex_names'] = names
+
+    buttons = [[InlineKeyboardButton(f"🗑 {name}", callback_data=f"delex_{i}")] for i, name in enumerate(names)]
     await update.message.reply_text(
         "🗑 Выбери упражнение для удаления из истории:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
     return MAIN_MENU
 
-
 async def delete_exercise_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    name = query.data.replace("delex_", "", 1)
+    idx = int(query.data.replace("delex_", "", 1))
+    names = context.user_data.get('delex_names', [])
+
+    if idx >= len(names):
+        await query.edit_message_text("❌ Упражнение не найдено, попробуй снова через меню.")
+        return
+
+    name = names[idx]
     user_id = query.from_user.id
 
     async with pool(context).acquire() as conn:
@@ -636,7 +646,7 @@ def main():
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
-    app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_(?!one_).+"))
+    app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_one_exercise, pattern="^delex_one_\\d+$"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
 
