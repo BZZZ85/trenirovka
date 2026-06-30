@@ -133,6 +133,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if context.user_data.get('waiting_preset_choice'):
+        return await use_preset_program(update, context)
     if context.user_data.get('waiting_delete_exercise'):
         return await process_delete_exercise(update, context)
     if context.user_data.get('waiting_progress_exercise'):
