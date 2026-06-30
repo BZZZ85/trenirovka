@@ -179,6 +179,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await manage_exercises(update, context)
     elif text == "🎯 Готовые программы":
         return await preset_programs_menu(update, context)
+    elif text == "📑 Шаблоны":
+        return await templates_menu(update, context)
     elif text == "💾 Сохранить как шаблон":
         if not context.user_data.get('last_exercises'):
             await update.message.reply_text("Нет данных последней тренировки.", reply_markup=main_keyboard())
