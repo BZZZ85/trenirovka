@@ -159,6 +159,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await save_template_name(update, context)
     if context.user_data.get('waiting_template_choice'):
         return await use_template(update, context)
+    if context.user_data.get('waiting_edit_weight'):
+        return await process_edit_weight(update, context)
     if text == "💪 Добавить тренировку":
         context.user_data['exercises'] = []
         context.user_data['workout_date'] = datetime.now().strftime("%d.%m.%Y")
@@ -477,7 +479,10 @@ async def show_workout_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     buttons = []
     for ex in exs:
-        buttons.append([InlineKeyboardButton(f"🗑 {ex['name']}", callback_data=f"delex_one_{ex['id']}")])
+        buttons.append([
+            InlineKeyboardButton(f"✏️ {ex['name']}", callback_data=f"editex_{ex['id']}"),
+            InlineKeyboardButton("🗑", callback_data=f"delex_one_{ex['id']}")
+        ])
     buttons.append([InlineKeyboardButton("🗑 Удалить всю тренировку", callback_data=f"delete_{workout_id}")])
 
     await query.edit_message_text(
@@ -493,7 +498,58 @@ async def delete_one_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE
         await conn.execute("DELETE FROM exercises WHERE id=$1", ex_id)
 
     await query.edit_message_text("✅ Упражнение удалено из тренировки.")
+async def edit_exercise_weight_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    ex_id = int(query.data.replace("editex_", "", 1))
 
+    async with pool(context).acquire() as conn:
+        ex = await conn.fetchrow("SELECT name, sets, reps, weight FROM exercises WHERE id=$1", ex_id)
+
+    if not ex:
+        await query.edit_message_text("❌ Упражнение не найдено.")
+        return
+
+    context.user_data['editing_exercise_id'] = ex_id
+    context.user_data['waiting_edit_weight'] = True
+
+    current = f"{ex['weight']} кг" if ex['weight'] else "без веса"
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text=f"✏️ *{ex['name']}* ({ex['sets']}×{ex['reps']})\nТекущий вес: {current}\n\nВведи новый вес (число, через пробел для нескольких подходов, или *без веса*):",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+    )
+
+
+async def process_edit_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    ex_id = context.user_data.pop('editing_exercise_id', None)
+    context.user_data.pop('waiting_edit_weight', None)
+
+    if text == "🔙 Назад" or not ex_id:
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    if text.lower() == "без веса":
+        weight = None
+    else:
+        parts = text.replace(",", ".").split()
+        try:
+            weights = [float(p) for p in parts]
+            weight = max(weights)
+        except ValueError:
+            await update.message.reply_text("❌ Введи числа через пробел или *без веса*:", parse_mode="Markdown")
+            context.user_data['editing_exercise_id'] = ex_id
+            context.user_data['waiting_edit_weight'] = True
+            return MAIN_MENU
+
+    async with pool(context).acquire() as conn:
+        await conn.execute("UPDATE exercises SET weight=$1 WHERE id=$2", weight, ex_id)
+
+    w_str = f"{weight} кг" if weight else "без веса"
+    await update.message.reply_text(f"✅ Вес обновлён: {w_str}", reply_markup=main_keyboard())
+    return MAIN_MENU
 async def delete_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -900,6 +956,9 @@ def main():
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_one_exercise, pattern="^delex_one_\\d+$"))
+    app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
+    app.add_handler(CallbackQueryHandler(edit_exercise_weight_prompt, pattern="^editex_\\d+$"))
+    app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
 
     logger.info("Бот запущен!")
