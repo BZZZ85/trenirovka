@@ -76,7 +76,7 @@ def main_keyboard():
         [KeyboardButton("💪 Добавить тренировку"), KeyboardButton("📋 История")],
         [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
         [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")],
-        [KeyboardButton("🗑 Упражнения")]
+        [KeyboardButton("Упражнения")]
     ], resize_keyboard=True)
 
 # ── СТАРТ ─────────────────────────────────────────────────────────────────────
