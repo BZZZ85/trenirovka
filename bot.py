@@ -612,7 +612,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Отменено.", reply_markup=main_keyboard())
     return MAIN_MENU
 
-
+async def error_handler(update, context):
+    logger.error("Exception while handling update:", exc_info=context.error)
 def main():
     TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     if not TOKEN:
@@ -644,6 +645,7 @@ def main():
     )
 
     app.add_handler(conv)
+    app.add_error_handler(error_handler)
     app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_\\d+$"))
