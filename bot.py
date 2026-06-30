@@ -92,6 +92,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if context.user_data.get('waiting_delete_exercise'):
+        return await process_delete_exercise(update, context)
     if context.user_data.get('waiting_progress_exercise'):
         return await show_exercise_progress(update, context)
     if text == "💪 Добавить тренировку":
@@ -110,7 +112,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await reminders_menu(update, context)
     elif text == "📈 Прогресс":
         return await show_progress(update, context)
-    elif text == "🗑 Упражнения":
+    elif text == "Упражнения":
         return await manage_exercises(update, context)
     return MAIN_MENU
 
@@ -571,6 +573,35 @@ async def manage_exercises(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.message.reply_text("📭 Нет упражнений.", reply_markup=main_keyboard())
         return MAIN_MENU
+
+    names = [r['name'] for r in rows]
+    buttons = [[KeyboardButton(name)] for name in names]
+    buttons.append([KeyboardButton("🔙 Назад")])
+
+    context.user_data['waiting_delete_exercise'] = True
+    await update.message.reply_text(
+        "Выбери упражнение для удаления из всей истории:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    return MAIN_MENU
+async def process_delete_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_delete_exercise', None)
+
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        await conn.execute("""
+            DELETE FROM exercises WHERE name=$1 AND workout_id IN (
+                SELECT id FROM workouts WHERE user_id=$2
+            )
+        """, text, user_id)
+
+    await update.message.reply_text(f"✅ Упражнение «{text}» удалено из всей истории.", reply_markup=main_keyboard())
+    return MAIN_MENU
 
     # Сохраняем имена во временный словарь, в кнопке передаём короткий индекс
     names = [r['name'] for r in rows]
