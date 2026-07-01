@@ -437,7 +437,7 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     async with pool(context).acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, date, notes FROM workouts WHERE user_id=$1 ORDER BY date DESC LIMIT 10",
+            "SELECT id, date, notes FROM workouts WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10",
             user_id
         )
     if not rows:
