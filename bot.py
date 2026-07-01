@@ -82,7 +82,7 @@ async def get_pool(app):
                 name TEXT NOT NULL,
                 sets INTEGER,
                 reps TEXT,
-                weight REAL
+                weight TEXT
             )''')
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS body_weight (
@@ -111,8 +111,23 @@ async def get_pool(app):
                 name TEXT NOT NULL,
                 sets INTEGER,
                 reps TEXT,
-                weight REAL
+                weight TEXT
             )''')
+        # Миграция: меняем тип weight с REAL на TEXT
+        try:
+            await conn.execute('''
+                ALTER TABLE exercises 
+                ALTER COLUMN weight TYPE TEXT USING weight::TEXT
+            ''')
+        except Exception:
+            pass
+        try:
+            await conn.execute('''
+                ALTER TABLE template_exercises 
+                ALTER COLUMN weight TYPE TEXT USING weight::TEXT
+            ''')
+        except Exception:
+            pass
     logger.info("БД готова.")
 
 
@@ -490,7 +505,11 @@ async def show_history_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     lines = [f"📅 *Тренировка {w['date']}*\n"]
     for ex in exs:
-        wt = f"{ex['weight']} кг" if ex['weight'] else "без веса"
+        if ex['weight']:
+            parts = ex['weight'].split()
+            wt = " / ".join(f"{w} кг" for w in parts) if len(parts) > 1 else f"{parts[0]} кг"
+        else:
+            wt = "без веса"
         lines.append(f"• *{ex['name']}*: {ex['sets']}×{ex['reps']} @ {wt}")
     if w['notes']:
         lines.append(f"\n📝 _{w['notes']}_")
@@ -713,6 +732,7 @@ async def process_edit_weight_new(update: Update, context: ContextTypes.DEFAULT_
             weights = [float(p) for p in parts]
             if len(weights) == 1:
                 weights = weights * sets
+            weight_str_db = " ".join(str(w) for w in weights)
             weight = max(weights)
         except ValueError:
             await update.message.reply_text("❌ Введи числа через пробел или *без веса*:", parse_mode="Markdown")
