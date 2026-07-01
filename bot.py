@@ -726,14 +726,15 @@ async def process_edit_weight_new(update: Update, context: ContextTypes.DEFAULT_
 
     if text.lower() == "без веса":
         weight = None
+        w_str = "без веса"
     else:
         parts = text.replace(",", ".").split()
         try:
             weights = [float(p) for p in parts]
             if len(weights) == 1:
                 weights = weights * sets
-            weight_str_db = " ".join(str(w) for w in weights)
-            weight = max(weights)
+            weight = " ".join(str(w) for w in weights)
+            w_str = " / ".join(f"{w} кг" for w in weights)
         except ValueError:
             await update.message.reply_text("❌ Введи числа через пробел или *без веса*:", parse_mode="Markdown")
             context.user_data['editing_exercise_id'] = ex_id
@@ -748,7 +749,6 @@ async def process_edit_weight_new(update: Update, context: ContextTypes.DEFAULT_
             sets, reps, weight, ex_id
         )
 
-    w_str = f"{weight} кг" if weight else "без веса"
     await update.message.reply_text(
         f"✅ Обновлено: {sets} подх. × {reps} повт. @ {w_str}",
         reply_markup=main_keyboard()
