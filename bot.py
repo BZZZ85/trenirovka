@@ -477,13 +477,18 @@ async def show_workout_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     if w['notes']:
         lines.append(f"\n📝 _{w['notes']}_")
 
+    # Сохраняем данные тренировки для дальнейших действий
+    context.user_data['current_workout_id'] = workout_id
+    context.user_data['current_workout_exercises'] = [
+        {'id': ex['id'], 'name': ex['name'], 'sets': ex['sets'], 'reps': ex['reps'], 'weight': ex['weight']}
+        for ex in exs
+    ]
+
     buttons = []
     for ex in exs:
-        buttons.append([
-            InlineKeyboardButton(f"✏️ {ex['name']}", callback_data=f"editex_{ex['id']}"),
-            InlineKeyboardButton("🗑", callback_data=f"delex_one_{ex['id']}")
-        ])
-    buttons.append([InlineKeyboardButton("🗑 Удалить всю тренировку", callback_data=f"delete_{workout_id}")])
+        wt = f"{ex['weight']} кг" if ex['weight'] else "без веса"
+        buttons.append([InlineKeyboardButton(f"✏️ {ex['name']} ({wt})", callback_data=f"editex_{ex['id']}")])
+    buttons.append([InlineKeyboardButton("🗑 Удалить тренировку", callback_data=f"delete_{workout_id}")])
 
     await query.edit_message_text(
         "\n".join(lines), parse_mode="Markdown",
@@ -952,6 +957,9 @@ def main():
 
     app.add_handler(conv)
     app.add_error_handler(error_handler)
+    async def log_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.info(f"CALLBACK: {update.callback_query.data}")
+    app.add_handler(CallbackQueryHandler(log_callback))
     app.add_handler(CallbackQueryHandler(show_workout_detail, pattern="^workout_"))
     app.add_handler(CallbackQueryHandler(delete_workout, pattern="^delete_\\d+$"))
     app.add_handler(CallbackQueryHandler(delete_exercise_type, pattern="^delex_\\d+$"))
