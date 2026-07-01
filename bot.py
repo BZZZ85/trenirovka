@@ -671,12 +671,15 @@ async def process_edit_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sets = context.user_data.get('editing_sets', 1)
     parts = text.split()
-    if len(parts) != sets:
-        await update.message.reply_text(f"❌ Нужно ввести {sets} чисел через пробел:")
+    # Если ввёл одно число — дублируем для всех подходов
+    if len(parts) == 1:
+        parts = parts * sets
+    elif len(parts) != sets:
+        await update.message.reply_text(f"❌ Введи {sets} чисел через пробел или одно для всех подходов:")
         context.user_data['waiting_edit_reps'] = True
         return MAIN_MENU
 
-    context.user_data['editing_reps'] = text
+    context.user_data['editing_reps'] = " ".join(parts)
     context.user_data['waiting_edit_weight_new'] = True
     await update.message.reply_text(
         f"🏋️ Введи вес для каждого подхода через пробел ({sets} подх.)\nНапример: `40 50 60`\nИли *без веса*:",
@@ -708,6 +711,8 @@ async def process_edit_weight_new(update: Update, context: ContextTypes.DEFAULT_
         parts = text.replace(",", ".").split()
         try:
             weights = [float(p) for p in parts]
+            if len(weights) == 1:
+                weights = weights * sets
             weight = max(weights)
         except ValueError:
             await update.message.reply_text("❌ Введи числа через пробел или *без веса*:", parse_mode="Markdown")
