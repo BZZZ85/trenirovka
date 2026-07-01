@@ -148,7 +148,7 @@ def main_keyboard():
         [KeyboardButton("⚖️ Записать вес"), KeyboardButton("📊 Статистика")],
         [KeyboardButton("📈 Прогресс"), KeyboardButton("⏰ Напоминания")],
         [KeyboardButton("Упражнения"), KeyboardButton("📑 Шаблоны")],
-        [KeyboardButton("🎯 Готовые программы")]
+        [KeyboardButton("🎯 Готовые программы"), KeyboardButton("🗑 Очистить всё")]
     ], resize_keyboard=True)
 
 # ── СТАРТ ─────────────────────────────────────────────────────────────────────
@@ -168,6 +168,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await use_preset_program(update, context)
     if context.user_data.get('waiting_delete_exercise'):
         return await process_delete_exercise(update, context)
+    if context.user_data.get('waiting_confirm_clear'):
+        return await process_clear_all(update, context)
     if context.user_data.get('waiting_history_choice'):
         return await show_history_detail(update, context)
     if context.user_data.get('waiting_history_action'):
@@ -217,7 +219,30 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['waiting_template_name'] = True
         await update.message.reply_text("Введи название шаблона (например: День ног):",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+    elif text == "🗑 Очистить всё":
+        context.user_data['waiting_confirm_clear'] = True
+        await update.message.reply_text(
+            "⚠️ Ты уверен? Это удалит ВСЕ тренировки, историю веса и статистику без возможности восстановления!",
+            reply_markup=ReplyKeyboardMarkup([
+                [KeyboardButton("✅ Да, удалить всё"), KeyboardButton("❌ Отмена")]
+            ], resize_keyboard=True)
+        )
         return MAIN_MENU
+async def process_clear_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_confirm_clear', None)
+
+    if text != "✅ Да, удалить всё":
+        await update.message.reply_text("❌ Отменено.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    user_id = update.effective_user.id
+    async with pool(context).acquire() as conn:
+        await conn.execute("DELETE FROM workouts WHERE user_id=$1", user_id)
+        await conn.execute("DELETE FROM body_weight WHERE user_id=$1", user_id)
+
+    await update.message.reply_text("✅ Вся история и статистика удалены.", reply_markup=main_keyboard())
+    return MAIN_MENU
 
 async def preset_programs_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [[KeyboardButton(name)] for name in PRESET_PROGRAMS.keys()]
