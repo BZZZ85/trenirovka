@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 (MAIN_MENU, ADD_WORKOUT_DATE, ADD_EXERCISE_NAME,
  ADD_SETS, ADD_REPS, ADD_WEIGHT, ADD_MORE_EXERCISES, ADD_NOTES,
- LOG_WEIGHT, SET_REMINDER) = range(10)
+ LOG_WEIGHT, SET_REMINDER, EDIT_SETS, EDIT_REPS, EDIT_WEIGHT) = range(13)
 
 PRESET_PROGRAMS = {
     "Full Body (3 дня/нед)": [
@@ -165,6 +165,14 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await use_template(update, context)
     if context.user_data.get('waiting_edit_weight'):
         return await process_edit_weight(update, context)
+    if context.user_data.get('waiting_edit_weight'):
+        return await process_edit_weight(update, context)
+    if context.user_data.get('waiting_edit_sets'):
+        return await process_edit_sets(update, context)
+    if context.user_data.get('waiting_edit_reps'):
+        return await process_edit_reps(update, context)
+    if context.user_data.get('waiting_edit_weight_new'):
+        return await process_edit_weight_new(update, context)
     if text == "💪 Добавить тренировку":
         context.user_data['exercises'] = []
         context.user_data['workout_date'] = datetime.now().strftime("%d.%m.%Y")
@@ -525,9 +533,9 @@ async def process_history_action(update: Update, context: ContextTypes.DEFAULT_T
     ex = next((e for e in exercises if e['name'] == ex_name), None)
     if ex:
         context.user_data['editing_exercise_id'] = ex['id']
-        context.user_data['waiting_edit_weight'] = True
+        context.user_data['waiting_edit_sets'] = True
         await update.message.reply_text(
-            f"✏️ *{ex_name}*\n\nВведи новый вес (число или несколько через пробел, или *без веса*):",
+            f"✏️ *{ex_name}*\n\nСколько подходов?",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
         )
@@ -608,12 +616,91 @@ async def edit_exercise_weight_prompt(update: Update, context: ContextTypes.DEFA
 
 async def process_edit_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    ex_id = context.user_data.pop('editing_exercise_id', None)
+    ex_id = context.user_data.get('editing_exercise_id')
     context.user_data.pop('waiting_edit_weight', None)
 
-    if text == "🔙 Назад" or not ex_id:
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        context.user_data.pop('editing_exercise_id', None)
+        return MAIN_MENU
+
+    # Спрашиваем подходы
+    context.user_data['editing_exercise_id'] = ex_id
+    context.user_data['waiting_edit_sets'] = True
+    await update.message.reply_text(
+        "🔢 Сколько подходов?",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+    )
+    return MAIN_MENU
+
+
+async def process_edit_sets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_edit_sets', None)
+
+    if text == "🔙 Назад":
         await update.message.reply_text("Меню:", reply_markup=main_keyboard())
         return MAIN_MENU
+
+    try:
+        sets = int(text)
+    except ValueError:
+        await update.message.reply_text("❌ Введи число:")
+        context.user_data['waiting_edit_sets'] = True
+        return MAIN_MENU
+
+    context.user_data['editing_sets'] = sets
+    context.user_data['waiting_edit_reps'] = True
+    await update.message.reply_text(
+        f"🔁 Введи повторения для каждого подхода через пробел ({sets} подх.)\nНапример: `10 8 6`",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+    )
+    return MAIN_MENU
+
+
+async def process_edit_reps(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_edit_reps', None)
+
+    if text == "🔙 Назад":
+        context.user_data['waiting_edit_sets'] = True
+        await update.message.reply_text("🔢 Сколько подходов?",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return MAIN_MENU
+
+    sets = context.user_data.get('editing_sets', 1)
+    parts = text.split()
+    if len(parts) != sets:
+        await update.message.reply_text(f"❌ Нужно ввести {sets} чисел через пробел:")
+        context.user_data['waiting_edit_reps'] = True
+        return MAIN_MENU
+
+    context.user_data['editing_reps'] = text
+    context.user_data['waiting_edit_weight_new'] = True
+    await update.message.reply_text(
+        f"🏋️ Введи вес для каждого подхода через пробел ({sets} подх.)\nНапример: `40 50 60`\nИли *без веса*:",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+    )
+    return MAIN_MENU
+
+
+async def process_edit_weight_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_edit_weight_new', None)
+
+    if text == "🔙 Назад":
+        context.user_data['waiting_edit_reps'] = True
+        sets = context.user_data.get('editing_sets', 1)
+        await update.message.reply_text(
+            f"🔁 Введи повторения ({sets} подх.):",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True))
+        return MAIN_MENU
+
+    ex_id = context.user_data.pop('editing_exercise_id', None)
+    sets = context.user_data.pop('editing_sets', 1)
+    reps = context.user_data.pop('editing_reps', '')
 
     if text.lower() == "без веса":
         weight = None
@@ -625,14 +712,22 @@ async def process_edit_weight(update: Update, context: ContextTypes.DEFAULT_TYPE
         except ValueError:
             await update.message.reply_text("❌ Введи числа через пробел или *без веса*:", parse_mode="Markdown")
             context.user_data['editing_exercise_id'] = ex_id
-            context.user_data['waiting_edit_weight'] = True
+            context.user_data['editing_sets'] = sets
+            context.user_data['editing_reps'] = reps
+            context.user_data['waiting_edit_weight_new'] = True
             return MAIN_MENU
 
     async with pool(context).acquire() as conn:
-        await conn.execute("UPDATE exercises SET weight=$1 WHERE id=$2", weight, ex_id)
+        await conn.execute(
+            "UPDATE exercises SET sets=$1, reps=$2, weight=$3 WHERE id=$4",
+            sets, reps, weight, ex_id
+        )
 
     w_str = f"{weight} кг" if weight else "без веса"
-    await update.message.reply_text(f"✅ Вес обновлён: {w_str}", reply_markup=main_keyboard())
+    await update.message.reply_text(
+        f"✅ Обновлено: {sets} подх. × {reps} повт. @ {w_str}",
+        reply_markup=main_keyboard()
+    )
     return MAIN_MENU
 async def delete_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
