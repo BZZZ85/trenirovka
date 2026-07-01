@@ -153,6 +153,10 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await use_preset_program(update, context)
     if context.user_data.get('waiting_delete_exercise'):
         return await process_delete_exercise(update, context)
+    if context.user_data.get('waiting_history_choice'):
+        return await show_history_detail(update, context)
+    if context.user_data.get('waiting_history_action'):
+        return await process_history_action(update, context)
     if context.user_data.get('waiting_progress_exercise'):
         return await show_exercise_progress(update, context)
     if context.user_data.get('waiting_template_name'):
@@ -444,18 +448,93 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 Пока нет тренировок.", reply_markup=main_keyboard())
         return MAIN_MENU
 
-    buttons = []
-    for r in rows:
-        label = f"📅 {r['date']}" + (f" — {r['notes'][:20]}..." if r['notes'] else "")
-        buttons.append([InlineKeyboardButton(label, callback_data=f"workout_{r['id']}")])
+    context.user_data['history_map'] = {
+        f"📅 {r['date']}" + (f" — {r['notes'][:15]}" if r['notes'] else ""): r['id']
+        for r in rows
+    }
+    buttons = [[KeyboardButton(label)] for label in context.user_data['history_map'].keys()]
+    buttons.append([KeyboardButton("🔙 Назад")])
 
+    context.user_data['waiting_history_choice'] = True
     await update.message.reply_text(
-        "📋 *Последние тренировки:*",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        "📋 Выбери тренировку:",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     )
     return MAIN_MENU
+async def show_history_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_history_choice', None)
 
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    history_map = context.user_data.get('history_map', {})
+    workout_id = history_map.get(text)
+
+    if not workout_id:
+        await update.message.reply_text("Тренировка не найдена.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    async with pool(context).acquire() as conn:
+        w = await conn.fetchrow("SELECT date, notes FROM workouts WHERE id=$1", workout_id)
+        exs = await conn.fetch("SELECT id, name, sets, reps, weight FROM exercises WHERE workout_id=$1", workout_id)
+
+    lines = [f"📅 *Тренировка {w['date']}*\n"]
+    for ex in exs:
+        wt = f"{ex['weight']} кг" if ex['weight'] else "без веса"
+        lines.append(f"• *{ex['name']}*: {ex['sets']}×{ex['reps']} @ {wt}")
+    if w['notes']:
+        lines.append(f"\n📝 _{w['notes']}_")
+
+    # Сохраняем упражнения для редактирования/удаления
+    context.user_data['detail_workout_id'] = workout_id
+    context.user_data['detail_exercises'] = [
+        {'id': ex['id'], 'name': ex['name']} for ex in exs
+    ]
+
+    buttons = [[KeyboardButton(f"✏️ {ex['name']}")] for ex in exs]
+    buttons.append([KeyboardButton("🗑 Удалить тренировку")])
+    buttons.append([KeyboardButton("🔙 Назад")])
+
+    context.user_data['waiting_history_action'] = True
+    await update.message.reply_text(
+        "\n".join(lines), parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    )
+    return MAIN_MENU
+async def process_history_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    context.user_data.pop('waiting_history_action', None)
+
+    if text == "🔙 Назад":
+        await update.message.reply_text("Меню:", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    workout_id = context.user_data.get('detail_workout_id')
+    exercises = context.user_data.get('detail_exercises', [])
+
+    if text == "🗑 Удалить тренировку":
+        async with pool(context).acquire() as conn:
+            await conn.execute("DELETE FROM workouts WHERE id=$1", workout_id)
+        await update.message.reply_text("✅ Тренировка удалена.", reply_markup=main_keyboard())
+        return MAIN_MENU
+
+    # Редактирование веса упражнения
+    ex_name = text.replace("✏️ ", "", 1)
+    ex = next((e for e in exercises if e['name'] == ex_name), None)
+    if ex:
+        context.user_data['editing_exercise_id'] = ex['id']
+        context.user_data['waiting_edit_weight'] = True
+        await update.message.reply_text(
+            f"✏️ *{ex_name}*\n\nВведи новый вес (число или несколько через пробел, или *без веса*):",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+        )
+        return MAIN_MENU
+
+    await update.message.reply_text("Не понял команду.", reply_markup=main_keyboard())
+    return MAIN_MENU
 
 async def show_workout_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
